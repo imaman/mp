@@ -33,6 +33,7 @@ table.main_output td {
 
 <script type="text/javascript">
 
+//$count() = 5  & $ count (sink, joiner) = 
 jQuery.fn.extend({
    insertAtCaret: function(myValue) {
      return this.each(function(i) {
@@ -63,6 +64,11 @@ var model = {};
 
 function htmlEncode(value){
    return $('<div/>').text(value).html();
+}
+
+function QuerySyntaxError(message) {
+   this.message = message;
+   this.name = "QuerySyntaxError";
 }
 
 function newParser(input_) {
@@ -100,7 +106,7 @@ function newParser(input_) {
 
       consume: function(numChars, what) {
          if (numChars == 0) 
-           throw new Error("Syntax error. Expected " + what + " but found '" + input + "'");
+           throw new QuerySyntaxError("Syntax error. Expected " + what + " but found '" + input + "'");
          var result = input.substring(0, numChars);
          input = jQuery.trim(input.substring(numChars));
          return result;
@@ -110,7 +116,7 @@ function newParser(input_) {
          var expressionTree = this.expression();
          if(input.length == 0)
             return expressionTree;
-         throw new Error("This part of the query could not be parsed: '" + input + "'");
+         throw new QuerySyntaxError("This part of the query could not be parsed: '" + input + "'");
       },
       
       expression: function() {
@@ -178,7 +184,7 @@ function newParser(input_) {
          if (this.consumeIf('(')) {
            var result = this.expression();
            if (!this.consumeIf(')'))
-             throw new Error("Missing ')'");
+             throw new QuerySyntaxError("Missing ')'");
            return result;
          }
          
@@ -193,7 +199,7 @@ function newParser(input_) {
          for (var i = 0; true; ++i) {
             var ch = this.peek(i);
             if(ch == eof) 
-               throw new Error('A non-terminated regexp: ending quote (") is missing');            
+               throw new QuerySyntaxError('A non-terminated regexp: ending quote (") is missing');            
             if(ch != '"') 
                continue;
                
@@ -206,13 +212,13 @@ function newParser(input_) {
       func: function() {
          var name = this.funcName();
          if (!this.consumeIf('('))
-            throw new Error("Missing '('");
+            throw new QuerySyntaxError("Missing '('");
          var args = [];
          while(true) {
             if(this.consumeIf(')'))
                break;            
             if(this.peek(0) == eof) 
-               throw new Error("Missing ')'");
+               throw new QuerySyntaxError("Missing ')'");
             args.push(this.expression());
             this.consumeIf(",")
          }
@@ -229,15 +235,15 @@ function newParser(input_) {
                return sum;
             }
          }
-         throw new Error("'" + s + "' is not a valid function.");
+         throw new QuerySyntaxError("'" + name + "' is not a valid function.");
       },
             
       funcName: function() {
          for (var i = 0; true; ++i) {
             var ch = this.peek(i);
             if(ch == eof) 
-               throw new Error("Found a function that is not followed by a parenthesis: '" + this.consume(i, "function name") + "'");
-            if(ch != '(') 
+               throw new QuerySyntaxError("Found a function that is not followed by a parenthesis: '" + this.consume(i, "function name") + "'");
+            if(ch != '(' && ch != ' ') 
                continue;
                
             return this.consume(i, "a function");
@@ -273,7 +279,7 @@ function newParser(input_) {
             var s = this.consume(i, "an MP name");
             var col = model.lookup(s);
             if(col < 0)
-               throw new Error("'" + s + "' is not a valid MP name.");
+               throw new QuerySyntaxError("'" + s + "' is not a valid MP name.");
             return function(row) { return model.isOn(row, col); }
          }
       }
@@ -369,8 +375,11 @@ function getFilter(parser) {
       $('#error_message').html('<span> </span>');
       return result;
    } catch(e) {
-      $('#error_message').html('<span style="color:red; font-weight:bold">' + e.message + '</span>');
-      return null;
+      if(e.name == 'QuerySyntaxError') {
+         $('#error_message').html('<span style="color:red; font-weight:bold">' + e.message + '</span>');
+         return null;
+      }      
+      throw e;
    }
 }
 
@@ -409,7 +418,7 @@ function dataIsHere() {
    $('#filter').focus();
    
    $('#filter').keyup(function(event) {
-      getFilter(newParser($(this).val()));
+//      getFilter(newParser($(this).val()));
    }); 
 
    $('#filter').keyup(function(event) {
