@@ -34,29 +34,29 @@ table.main_output td {
 <script type="text/javascript">
 
 jQuery.fn.extend({
-insertAtCaret: function(myValue){
-  return this.each(function(i) {
-    if (document.selection) {
-      this.focus();
-      sel = document.selection.createRange();
-      sel.text = myValue;
-      this.focus();
-    }
-    else if (this.selectionStart || this.selectionStart == '0') {
-      var startPos = this.selectionStart;
-      var endPos = this.selectionEnd;
-      var scrollTop = this.scrollTop;
-      this.value = this.value.substring(0, startPos)+myValue+this.value.substring(endPos,this.value.length);
-      this.focus();
-      this.selectionStart = startPos + myValue.length;
-      this.selectionEnd = startPos + myValue.length;
-      this.scrollTop = scrollTop;
-    } else {
-      this.value += myValue;
-      this.focus();
-    }
-  })
-}
+   insertAtCaret: function(myValue) {
+     return this.each(function(i) {
+       if (document.selection) {
+         this.focus();
+         sel = document.selection.createRange();
+         sel.text = myValue;
+         this.focus();
+       }
+       else if (this.selectionStart || this.selectionStart == '0') {
+         var startPos = this.selectionStart;
+         var endPos = this.selectionEnd;
+         var scrollTop = this.scrollTop;
+         this.value = this.value.substring(0, startPos)+myValue+this.value.substring(endPos,this.value.length);
+         this.focus();
+         this.selectionStart = startPos + myValue.length;
+         this.selectionEnd = startPos + myValue.length;
+         this.scrollTop = scrollTop;
+       } else {
+         this.value += myValue;
+         this.focus();
+       }
+     })
+   }
 });
 
 var model = {};
@@ -170,15 +170,9 @@ function newParser(input_) {
             return function(row) { return !u(row) };
          }
          
-         if(this.consumeIf('~')) {
+         if(this.consumeIf('"')) {
             var r = this.regexp();
-            return function(row) { 
-               var cn = model.get(row, 0);
-               var mat = r.exec(cn); 
-               if(mat == null)
-                  return false;
-               return true;
-            };
+            return function(row) { return r.exec(model.get(row, 0)); };
          }
 
          if (this.consumeIf('(')) {
@@ -187,6 +181,10 @@ function newParser(input_) {
              throw new Error("Missing ')'");
            return result;
          }
+         
+         if(this.consumeIf('$')) {
+            return this.func();
+         }
 
          return this.literal();
       },
@@ -194,14 +192,55 @@ function newParser(input_) {
       regexp: function() {
          for (var i = 0; true; ++i) {
             var ch = this.peek(i);
-            if(ch != eof && ch != '~') 
+            if(ch == eof) 
+               throw new Error('A non-terminated regexp: ending quote (") is missing');            
+            if(ch != '"') 
                continue;
                
-            if(i == 0) 
-               throw new Error("An empty regexp (~)");
-            var regexp = this.consume(i, "a regular expression");
+            var regexp = this.consume(i, "a non-empty regular expression");
             this.consume(1);
             return new RegExp(regexp);
+         }
+      },
+
+      func: function() {
+         var name = this.funcName();
+         if (!this.consumeIf('('))
+            throw new Error("Missing '('");
+         var args = [];
+         while(true) {
+            if(this.consumeIf(')'))
+               break;            
+            if(this.peek(0) == eof) 
+               throw new Error("Missing ')'");
+            args.push(this.expression());
+            this.consumeIf(",")
+         }
+         if(name == 'count') {
+            if(args.length == 0)
+               return function(row) { return model.allMpsOf(row).length; }
+            return function(row) {
+               var sum = 0;
+               for(var i = 0; i < args.length; ++i) {
+                  if(args[i](row))
+                     ++sum;
+               }
+               
+               return sum;
+            }
+         }
+         throw new Error("'" + s + "' is not a valid function.");
+      },
+            
+      funcName: function() {
+         for (var i = 0; true; ++i) {
+            var ch = this.peek(i);
+            if(ch == eof) 
+               throw new Error("Found a function that is not followed by a parenthesis: '" + this.consume(i, "function name") + "'");
+            if(ch != '(') 
+               continue;
+               
+            return this.consume(i, "a function");
          }
       },
 
@@ -224,17 +263,14 @@ function newParser(input_) {
             return function(row) { return num; }
          }
       },
-            
+                  
       name: function() {
          for (var i = 0; true; ++i) {
             var ch = this.peek(i);
             if(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z') 
                continue;
                
-            var s = this.consume(i, "either an MP name or 'count'");            
-            if(s == 'count') {
-               return function(row) { return model.allMpsOf(row).length; }
-            }
+            var s = this.consume(i, "an MP name");
             var col = model.lookup(s);
             if(col < 0)
                throw new Error("'" + s + "' is not a valid MP name.");
@@ -327,14 +363,21 @@ function renderRow(n, row) {
    return result;
 }
 
+function getFilter(parser) {
+   try {
+      var result = parser.parse();
+      $('#error_message').html('<span> </span>');
+      return result;
+   } catch(e) {
+      $('#error_message').html('<span style="color:red; font-weight:bold">' + e.message + '</span>');
+      return null;
+   }
+}
+
 function applyFilter(query) {
    var parser = newParser(query);
-   var filter = null;
-   try {
-      filter = parser.parse();
-   } 
-   catch(e) {
-      $('#display').html('<span style="color:red; font-weight:bold">' + e.message + '</span>');
+   var filter = getFilter(parser);
+   if(!filter) {
       return;
    }
    
@@ -364,12 +407,15 @@ function applyFilter(query) {
 
 function dataIsHere() {
    $('#filter').focus();
+   
    $('#filter').keyup(function(event) {
-      if(event.keyCode != 13) {
-         return;
+      getFilter(newParser($(this).val()));
+   }); 
+
+   $('#filter').keyup(function(event) {
+      if(event.keyCode == 13) {
+         applyFilter($(this).val());
       }
-      
-      applyFilter($(this).val());
    }); 
 }
 
@@ -414,11 +460,13 @@ $(document).ready(function() {
 </head>
 <body>
 Filter: <input type="text" id="filter" size="100" name="mp_filter_field" autocomplete="on"><br/>
+<pre id="error_message">
+</pre>
+<pre id="display">
+</pre>
 <pre id="list_of_mps">
 </pre>
 <pre id="status_bar">
-</pre>
-<pre id="display">
 </pre>
 <pre id="out">
 </pre>
